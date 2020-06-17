@@ -4,7 +4,7 @@ import java.util
 
 import io.searchbox.client.config.HttpClientConfig
 import io.searchbox.client.{JestClient, JestClientFactory}
-import io.searchbox.core.{Index, Search, SearchResult}
+import io.searchbox.core.{Bulk, BulkResult, Index, Search, SearchResult}
 import org.elasticsearch.index.query.{BoolQueryBuilder, MatchQueryBuilder, TermQueryBuilder}
 import org.elasticsearch.search.builder.SearchSourceBuilder
 import org.elasticsearch.search.highlight.{HighlightBuilder, HighlightField}
@@ -41,6 +41,22 @@ object MyEsUtil {
     }
     jest.close()
   }
+  def  bulkDoc( sourceList:List[Any],indexName:String): Unit ={
+    if(sourceList!=null&&sourceList.size>0){
+      val jest: JestClient = getClient
+      val bulkBuilder = new Bulk.Builder          //构造批次操作
+      for (source <- sourceList ) {
+        val index = new Index.Builder(source).index(indexName).`type`("_doc").build()
+        bulkBuilder.addAction(index)
+      }
+      val bulk: Bulk = bulkBuilder.build()
+      val result: BulkResult = jest.execute(bulk)
+      val items: util.List[BulkResult#BulkResultItem] = result.getItems
+      println("保存到ES:"+items.size()+"条数")
+      jest.close()
+    }
+  }
+
 
   // 把结构封装的Map 必须使用java 的   ，不能使用scala
   def queryDoc(): Unit ={

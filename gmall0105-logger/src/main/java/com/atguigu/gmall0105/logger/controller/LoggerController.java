@@ -9,6 +9,9 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.UUID;
 
 
@@ -40,6 +43,8 @@ public class LoggerController {
 
         return logString;
     }
+
+
 
 
 }
