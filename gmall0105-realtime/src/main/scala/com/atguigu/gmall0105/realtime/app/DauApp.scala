@@ -6,8 +6,9 @@ import java.util.Date
 
 import com.alibaba.fastjson.{JSON, JSONObject}
 import com.atguigu.gmall0105.realtime.bean.DauInfo
-import com.atguigu.gmall0105.realtime.util.{MyEsUtil, MyKafkaUtil, RedisUtil}
+import com.atguigu.gmall0105.realtime.util.{MyEsUtil, MyKafkaUtil, OffsetManager, RedisUtil}
 import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.kafka.common.TopicPartition
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
@@ -23,8 +24,17 @@ object DauApp {
     val sparkConf: SparkConf = new SparkConf().setAppName("dau_app").setMaster("local[4]")
     val ssc = new StreamingContext(sparkConf,Seconds(5))
     val topic="GMALL_STARTUP_0105"
-    val recordInputStream: InputDStream[ConsumerRecord[String, String]] = MyKafkaUtil.getKafkaStream(topic,ssc)
-  
+    val groupId="DAU_GROUP"
+    val kafkaOffsetMap: Map[TopicPartition, Long] = OffsetManager.getOffset(topic,groupId)
+    var recordInputStream: InputDStream[ConsumerRecord[String, String]]=null
+    if(kafkaOffsetMap!=null&&kafkaOffsetMap.size>0){
+         recordInputStream = MyKafkaUtil.getKafkaStream(topic,ssc,kafkaOffsetMap,groupId)
+    }else{
+         recordInputStream = MyKafkaUtil.getKafkaStream(topic,ssc)
+    }
+
+
+
  //   recordInputStream.map(_.value()).print()
 
     val jsonObjDstream: DStream[JSONObject] = recordInputStream.map { record =>
@@ -99,6 +109,10 @@ object DauApp {
           val dt: String = new SimpleDateFormat("yyyy-MM-dd").format(new Date())
           MyEsUtil.bulkDoc(dauList,"gmall0105_dau_info_"+dt)
 
+
+        ///
+        // 偏移量提交区
+        ///
       }
 
 
