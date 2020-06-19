@@ -11,6 +11,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
+import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 import redis.clients.jedis.Jedis
 
@@ -33,11 +34,18 @@ object DauApp {
          recordInputStream = MyKafkaUtil.getKafkaStream(topic,ssc)
     }
 
+    //得到本批次的偏移量的结束位置，用于更新redis中的偏移量
+    var  offsetRanges: Array[OffsetRange] = Array.empty[OffsetRange]
+    val  inputGetOffsetDstream: DStream[ConsumerRecord[String, String]] = recordInputStream.transform { rdd =>
+      offsetRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges  //driver? executor?  //周期性的执行
+      rdd
+    }
 
 
- //   recordInputStream.map(_.value()).print()
 
-    val jsonObjDstream: DStream[JSONObject] = recordInputStream.map { record =>
+    //   recordInputStream.map(_.value()).print()
+
+    val jsonObjDstream: DStream[JSONObject] = inputGetOffsetDstream.map { record =>
       val jsonString: String = record.value()
       val jsonObj: JSONObject = JSON.parseObject(jsonString)
       val ts: lang.Long = jsonObj.getLong("ts")
@@ -73,7 +81,7 @@ object DauApp {
       val filteredList=new ListBuffer[JSONObject]()
       //  Iterator 只能迭代一次 包括取size   所以要取size 要把迭代器转为别的容器
       val jsonList: List[JSONObject] = jsonObjItr.toList
-       println("过滤前："+jsonList.size)
+    //   println("过滤前："+jsonList.size)
       for (jsonObj <- jsonList) {
           val dt: String = jsonObj.getString("dt")
           val mid: String = jsonObj.getJSONObject("common").getString("mid")
@@ -85,7 +93,7 @@ object DauApp {
           }
       }
       jedis.close()
-      println("过滤后："+filteredList.size)
+     // println("过滤后："+filteredList.size)
       filteredList.toIterator
     }
 
@@ -93,9 +101,9 @@ object DauApp {
       rdd.foreachPartition{jsonItr=>
           val list: List[JSONObject] = jsonItr.toList
         //把源数据 转换成为要保存的数据格式
-        val dauList: List[DauInfo] = list.map { jsonObj =>
+        val dauList: List[(String,DauInfo)] = list.map { jsonObj =>
           val commonJSONObj: JSONObject = jsonObj.getJSONObject("common")
-           DauInfo(commonJSONObj.getString("mid"),
+          val dauInfo = DauInfo(commonJSONObj.getString("mid"),
             commonJSONObj.getString("uid"),
             commonJSONObj.getString("ar"),
             commonJSONObj.getString("ch"),
@@ -105,16 +113,18 @@ object DauApp {
             "00",
             jsonObj.getLong("ts")
           )
+
+          (dauInfo.mid,dauInfo)
+
         }
           val dt: String = new SimpleDateFormat("yyyy-MM-dd").format(new Date())
           MyEsUtil.bulkDoc(dauList,"gmall0105_dau_info_"+dt)
 
-
-        ///
-        // 偏移量提交区
-        ///
       }
-
+      ///
+      // 偏移量提交区
+      OffsetManager.saveOffset(topic,groupId,offsetRanges)
+      ///
 
     }
 

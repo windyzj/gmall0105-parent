@@ -41,12 +41,12 @@ object MyEsUtil {
     }
     jest.close()
   }
-  def  bulkDoc( sourceList:List[Any],indexName:String): Unit ={
+  def  bulkDoc( sourceList:List[(String,Any)],indexName:String): Unit ={
     if(sourceList!=null&&sourceList.size>0){
       val jest: JestClient = getClient
       val bulkBuilder = new Bulk.Builder          //构造批次操作
-      for (source <- sourceList ) {
-        val index = new Index.Builder(source).index(indexName).`type`("_doc").build()
+      for ((id,source) <- sourceList ) {
+        val index = new Index.Builder(source).index(indexName).`type`("_doc").id(id).build()
         bulkBuilder.addAction(index)
       }
       val bulk: Bulk = bulkBuilder.build()
