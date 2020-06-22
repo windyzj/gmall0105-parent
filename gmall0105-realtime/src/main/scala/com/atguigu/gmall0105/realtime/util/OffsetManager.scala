@@ -38,7 +38,7 @@ object OffsetManager {
         val partition: Int = offset.partition
         val untilOffset: Long = offset.untilOffset
          offsetMap.put(partition+"",untilOffset+"")
-         println("写入分区："+partition +":"+offset.fromOffset+"-->"+offset.untilOffset)
+         //println("写入分区："+partition +":"+offset.fromOffset+"-->"+offset.untilOffset)
       }
       //写入redis
       if(offsetMap!=null&&offsetMap.size()>0){
