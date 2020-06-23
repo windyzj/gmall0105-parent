@@ -40,10 +40,15 @@ object BaseDbMaxwell {
     }
 
 
+
+
     jsonObjDstream.foreachRDD{rdd=>
       // 推回kafka
       rdd.foreach{jsonObj=>
-        if(jsonObj.getJSONObject("data")!=null && !jsonObj.getJSONObject("data").isEmpty){
+        print(jsonObj.toString)
+        if(jsonObj.getJSONObject("data")!=null && !jsonObj.getJSONObject("data").isEmpty
+          &&("insert".equals(jsonObj.getString("type")) || "update".equals(jsonObj.getString("type")))
+        ){
           val jsonString=jsonObj.getString("data")
           val tableName: String = jsonObj.getString("table")
           val topic="ODS_"+tableName.toUpperCase

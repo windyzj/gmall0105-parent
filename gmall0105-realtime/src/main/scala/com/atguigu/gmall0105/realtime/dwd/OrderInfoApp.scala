@@ -1,7 +1,7 @@
 package com.atguigu.gmall0105.realtime.dwd
 
 import com.alibaba.fastjson.{JSON, JSONObject}
-import com.atguigu.gmall0105.realtime.bean.{OrderInfo, UserState}
+import com.atguigu.gmall0105.realtime.bean.{OrderInfo, ProvinceInfo, UserState}
 import com.atguigu.gmall0105.realtime.util.{MyKafkaUtil, OffsetManager, PhoenixUtil}
 import org.apache.hadoop.conf.Configuration
 import org.apache.kafka.clients.consumer.ConsumerRecord
@@ -11,6 +11,7 @@ import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
 import org.apache.phoenix.spark._
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 
 object OrderInfoApp {
@@ -60,7 +61,7 @@ object OrderInfoApp {
         for (orderInfo <- orderInfoList) { //每条数据
           //得到是否消费
           val if_consumed: String = userStateMap.getOrElse(orderInfo.user_id.toString, null)
-          if (if_consumed != null || if_consumed == "1") { //如果是消费用户  首单标志置为0
+          if (if_consumed != null && if_consumed == "1") { //如果是消费用户  首单标志置为0
             orderInfo.if_first_order = "0";
           } else {
             orderInfo.if_first_order = "1";
@@ -70,7 +71,94 @@ object OrderInfoApp {
       orderInfoList.toIterator
     }
 
-    orderInfoWithFirstFlagDstream.print(1000)
+    // 利用hbase  进行查询过滤 识别首单，只能进行跨批次的判断
+    //  如果新用户在同一批次 多次下单 会造成 该批次该用户所有订单都识别为首单
+    //  应该同一批次一个用户只有最早的订单 为首单 其他的单据为非首单
+    // 处理办法： 1 同一批次 同一用户  2 最早的订单  3 标记首单
+    //           1 分组： 按用户      2  排序  取最早  3 如果最早的订单被标记为首单，除最早的单据一律改为非首单
+    //           1  groupbykey       2  sortWith    3  if ...
+
+    //调整结果变为k-v 为分组做准备
+    val OrderInfoWithKeyDstream: DStream[(Long, OrderInfo)] = orderInfoWithFirstFlagDstream.map(orderInfo=>(orderInfo.user_id,orderInfo))
+   //分组 按用户
+    val orderInfoGroupByUidDstream: DStream[(Long, Iterable[OrderInfo])] = OrderInfoWithKeyDstream.groupByKey()
+   //组内进行排序 ，最早的订单被标记为首单，除最早的单据一律改为非首单
+    val orderInfoWithFirstRealFlagDstream: DStream[OrderInfo] = orderInfoGroupByUidDstream.flatMap { case (userId, orderInfoItr) =>
+      if (orderInfoItr.size > 1) {
+        //排序
+        val userOrderInfoSortedList: List[OrderInfo] = orderInfoItr.toList.sortWith((orderInfo1, orderInfo2) => orderInfo1.create_time < orderInfo2.create_time)
+        val orderInfoFirst: OrderInfo = userOrderInfoSortedList(0)
+        if (orderInfoFirst.if_first_order == "1") {
+          for (i <- 1 to userOrderInfoSortedList.size - 1) {
+            val orderInfoNotFirst: OrderInfo = userOrderInfoSortedList(i)
+            orderInfoNotFirst.if_first_order = "0"
+          }
+        }
+        userOrderInfoSortedList
+      } else {
+        orderInfoItr.toList
+      }
+    }
+
+    // 优化 ： 因为传输量小  使用数据的占比大  可以考虑使用广播变量     查询hbase的次数会变小   分区越多效果越明显
+    //利用driver进行查询 再利用广播变量进行分发
+    val orderInfoWithProvinceDstream: DStream[OrderInfo] = orderInfoWithFirstRealFlagDstream.transform { rdd =>
+      //driver  按批次周期性执行
+      //driver中查询
+      val sql = "select  id,name,area_code,iso_code from gmall0105_province_info "
+      val provinceInfoList: List[JSONObject] = PhoenixUtil.queryList(sql)
+      //封装广播变量
+      val provinceMap: Map[String, ProvinceInfo] = provinceInfoList.map { jsonObj =>
+        val provinceInfo = ProvinceInfo(jsonObj.getString("ID"),
+          jsonObj.getString("NAME"),
+          jsonObj.getString("AREA_CODE"),
+          jsonObj.getString("ISO_CODE")
+        )
+        (provinceInfo.id, provinceInfo)
+      }.toMap
+
+      val provinceBC: Broadcast[Map[String, ProvinceInfo]] = ssc.sparkContext.broadcast(provinceMap)
+
+      val orderInfoWithProvinceRDD: RDD[OrderInfo] = rdd.map { orderInfo => //  ex 2
+        val provinceMap: Map[String, ProvinceInfo] = provinceBC.value
+        val provinceInfo: ProvinceInfo = provinceMap.getOrElse(orderInfo.province_id.toString, null)
+        if(provinceInfo!=null){
+          orderInfo.province_name = provinceInfo.name
+          orderInfo.province_area_code = provinceInfo.area_code
+          orderInfo.province_iso_code = provinceInfo.iso_code
+        }
+        orderInfo
+      }
+      orderInfoWithProvinceRDD
+
+    }
+
+
+
+//    orderInfoWithFirstRealFlagDstream.mapPartitions{orderInfoItr=>
+//      val orderInfoList: List[OrderInfo] = orderInfoItr.toList
+//
+//      val provinceList: List[JSONObject] = provinceBC.value
+//      null
+//    }
+
+
+
+
+
+//待优化 可以节省查询次数
+/*    orderInfoWithFirstRealFlagDstream.mapPartitions{orderInfoItr=>
+      val orderInfoList: List[OrderInfo] = orderInfoItr.toList
+      val provinceIdList: List[Long] = orderInfoList.map(_.province_id)
+
+      val sql = "select  id,name,area_code,iso_code from gmall0105_province_info where  id in ('" + provinceIdList.mkString("','") + "')"
+      val provinceInfoList: List[JSONObject] = PhoenixUtil.queryList(sql)
+      null
+    }*/
+
+
+
+    orderInfoWithProvinceDstream.print(1000)
 
       /*  查询次数太多 欠优化
         orderInfoDstream.map{orderInfo=>
@@ -97,7 +185,8 @@ object OrderInfoApp {
       // 维度数据的合并
 
       // 保存 用户状态--> 更新hbase 维护状态
-    orderInfoWithFirstFlagDstream.foreachRDD{rdd=>
+    orderInfoWithProvinceDstream.foreachRDD{rdd=>
+      //driver
     //Seq 中的字段顺序 和 rdd中对象的顺序一直
       // 把首单的订单 更新到用户状态中
       val newConsumedUserRDD: RDD[UserState] = rdd.filter(_.if_first_order=="1").map(orderInfo=> UserState(orderInfo.user_id.toString,"1" ))
