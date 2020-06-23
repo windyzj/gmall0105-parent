@@ -43,11 +43,12 @@ object BaseDbMaxwell {
     jsonObjDstream.foreachRDD{rdd=>
       // 推回kafka
       rdd.foreach{jsonObj=>
-        val jsonString=jsonObj.getString("data")
-        val tableName: String = jsonObj.getString("table")
-        val topic="ODS_"+tableName.toUpperCase
-        MyKafkaSink.send(topic,jsonString)   //非幂等的操作 可能会导致数据重复
-
+        if(jsonObj.getJSONObject("data")!=null && !jsonObj.getJSONObject("data").isEmpty){
+          val jsonString=jsonObj.getString("data")
+          val tableName: String = jsonObj.getString("table")
+          val topic="ODS_"+tableName.toUpperCase
+          MyKafkaSink.send(topic,jsonString)   //非幂等的操作 可能会导致数据重复
+        }
       }
 
       OffsetManager.saveOffset(topic,groupId,offsetRanges)

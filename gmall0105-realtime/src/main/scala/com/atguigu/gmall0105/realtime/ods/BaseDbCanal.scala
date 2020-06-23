@@ -22,7 +22,7 @@ object BaseDbCanal {
     if(kafkaOffsetMap!=null&&kafkaOffsetMap.size>0){
       recordInputStream = MyKafkaUtil.getKafkaStream(topic,ssc,kafkaOffsetMap,groupId)
     }else{
-      recordInputStream = MyKafkaUtil.getKafkaStream(topic,ssc)
+      recordInputStream = MyKafkaUtil.getKafkaStream(topic,ssc,groupId)
     }
 
     //得到本批次的偏移量的结束位置，用于更新redis中的偏移量
@@ -43,13 +43,15 @@ object BaseDbCanal {
     jsonObjDstream.foreachRDD{rdd=>
       // 推回kafka
       rdd.foreach{jsonObj=>
-        val jsonArr=jsonObj.getJSONArray("data")
-        val tableName: String = jsonObj.getString("table")
-        val topic="ODS_"+tableName.toUpperCase
-        import  scala.collection.JavaConversions._
-        for (jsonObj <- jsonArr ) {
-          val msg: String = jsonObj.toString
-          MyKafkaSink.send(topic,msg)   //非幂等的操作 可能会导致数据重复
+        if(jsonObj.getString("type").equals("INSERT")||jsonObj.getString("type").equals("UPDATE")||jsonObj.getString("type").equals("DELETE")){
+          val jsonArr=jsonObj.getJSONArray("data")
+          val tableName: String = jsonObj.getString("table")
+          val topic="ODS_"+tableName.toUpperCase
+          import  scala.collection.JavaConversions._
+          for (jsonObj <- jsonArr ) {
+            val msg: String = jsonObj.toString
+            MyKafkaSink.send(topic,msg)   //非幂等的操作 可能会导致数据重复
+          }
         }
 
       }
