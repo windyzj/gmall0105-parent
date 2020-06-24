@@ -44,7 +44,7 @@ object ProvinceApp {
                 provinceInfo
       }
       provinceInfoRDD.saveToPhoenix("gmall0105_province_info",
-        Seq("ID" , "NAME" , "AREA_CODE","ISO_CODE"),new Configuration,Some("hdp1,hdp2,hdp3:2181")  )
+        Seq("ID" , "NAME" , "AREA_CODE","ISO_CODE","ISO_3166_2"),new Configuration,Some("hdp1,hdp2,hdp3:2181")  )
 
       OffsetManager.saveOffset(topic,groupId,offsetRanges)
     }

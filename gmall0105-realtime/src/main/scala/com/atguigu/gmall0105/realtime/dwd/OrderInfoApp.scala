@@ -1,8 +1,12 @@
 package com.atguigu.gmall0105.realtime.dwd
 
+import java.text.SimpleDateFormat
+import java.util.Date
+
+import com.alibaba.fastjson.serializer.SerializeConfig
 import com.alibaba.fastjson.{JSON, JSONObject}
 import com.atguigu.gmall0105.realtime.bean.{OrderInfo, ProvinceInfo, UserState}
-import com.atguigu.gmall0105.realtime.util.{MyKafkaUtil, OffsetManager, PhoenixUtil}
+import com.atguigu.gmall0105.realtime.util.{MyEsUtil, MyKafkaSink, MyKafkaUtil, OffsetManager, PhoenixUtil}
 import org.apache.hadoop.conf.Configuration
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
@@ -105,14 +109,15 @@ object OrderInfoApp {
     val orderInfoWithProvinceDstream: DStream[OrderInfo] = orderInfoWithFirstRealFlagDstream.transform { rdd =>
       //driver  按批次周期性执行
       //driver中查询
-      val sql = "select  id,name,area_code,iso_code from gmall0105_province_info "
+      val sql = "select  id,name,area_code,iso_code,iso_3166_2 from gmall0105_province_info "
       val provinceInfoList: List[JSONObject] = PhoenixUtil.queryList(sql)
       //封装广播变量
       val provinceMap: Map[String, ProvinceInfo] = provinceInfoList.map { jsonObj =>
         val provinceInfo = ProvinceInfo(jsonObj.getString("ID"),
           jsonObj.getString("NAME"),
           jsonObj.getString("AREA_CODE"),
-          jsonObj.getString("ISO_CODE")
+          jsonObj.getString("ISO_CODE"),
+          jsonObj.getString("ISO_3166_2")
         )
         (provinceInfo.id, provinceInfo)
       }.toMap
@@ -126,6 +131,7 @@ object OrderInfoApp {
           orderInfo.province_name = provinceInfo.name
           orderInfo.province_area_code = provinceInfo.area_code
           orderInfo.province_iso_code = provinceInfo.iso_code
+          orderInfo.province_iso_3166_2 = provinceInfo.iso_3166_2
         }
         orderInfo
       }
@@ -183,7 +189,7 @@ object OrderInfoApp {
 
 
       // 维度数据的合并
-
+    orderInfoWithProvinceDstream.cache()
       // 保存 用户状态--> 更新hbase 维护状态
     orderInfoWithProvinceDstream.foreachRDD{rdd=>
       //driver
@@ -194,8 +200,26 @@ object OrderInfoApp {
         new Configuration,Some("hdp1,hdp2,hdp3:2181"))
 
 
-      OffsetManager.saveOffset(topic,groupId,offsetRanges)
+
     }
+
+    orderInfoWithProvinceDstream.foreachRDD{rdd=>
+        rdd.foreachPartition{ orderInfoItr=>
+          val orderInfoList: List[OrderInfo] = orderInfoItr.toList
+          val orderInfoWithIdList: List[(String, OrderInfo)] = orderInfoList.map(orderInfo=>(orderInfo.id.toString,orderInfo))
+          val dateString: String = new SimpleDateFormat("yyyy-MM-dd").format(new Date())
+          MyEsUtil.bulkDoc(orderInfoWithIdList,"gmall0105_order_info_"+dateString)
+          for (orderInfo <- orderInfoList ) {
+            val orderInfoJsonString: String  = JSON.toJSONString(orderInfo,new SerializeConfig(true))
+             MyKafkaSink.send("DWD_ORDER_INFO",orderInfoJsonString)
+          }
+
+        }
+      OffsetManager.saveOffset(topic,groupId,offsetRanges)
+
+    }
+
+
 
       // 保存 订单明细 --> OLAP  即席查询
       // 保存到 Kafka --> 继续加工

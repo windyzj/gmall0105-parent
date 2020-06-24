@@ -45,9 +45,13 @@ object BaseDbMaxwell {
     jsonObjDstream.foreachRDD{rdd=>
       // 推回kafka
       rdd.foreach{jsonObj=>
-        print(jsonObj.toString)
+        println(jsonObj.toString)
         if(jsonObj.getJSONObject("data")!=null && !jsonObj.getJSONObject("data").isEmpty
-          &&("insert".equals(jsonObj.getString("type")) || "update".equals(jsonObj.getString("type")))
+          && !"delete".equals(jsonObj.getString("type")) &&
+          (("order_info".equals(jsonObj.getString("table"))&&"insert".equals(jsonObj.getString("type") ))
+          ||"order_detail".equals(jsonObj.getString("table"))
+          ||"base_province".equals(jsonObj.getString("table"))
+          )
         ){
           val jsonString=jsonObj.getString("data")
           val tableName: String = jsonObj.getString("table")
