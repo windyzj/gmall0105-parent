@@ -52,8 +52,10 @@ object OrderDetailApp {
       orderDetailDstream.foreachRDD{rdd=>
           rdd.foreach{ orderDetail=>
             val orderDetailJsonString: String  = JSON.toJSONString(orderDetail,new SerializeConfig(true))
-             MyKafkaSink.send("DWD_ORDER_DETAIL",orderDetailJsonString)
+             MyKafkaSink.send("DWD_ORDER_DETAIL",orderDetail.order_id.toString,orderDetailJsonString)
           }
+
+        OffsetManager.saveOffset(topic,groupId,offsetRanges)
       }
 
       ssc.start()

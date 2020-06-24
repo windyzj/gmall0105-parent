@@ -56,6 +56,7 @@ object BaseDbMaxwell {
           val jsonString=jsonObj.getString("data")
           val tableName: String = jsonObj.getString("table")
           val topic="ODS_"+tableName.toUpperCase
+          Thread.sleep(500)
           MyKafkaSink.send(topic,jsonString)   //非幂等的操作 可能会导致数据重复
         }
       }

@@ -211,7 +211,7 @@ object OrderInfoApp {
           MyEsUtil.bulkDoc(orderInfoWithIdList,"gmall0105_order_info_"+dateString)
           for (orderInfo <- orderInfoList ) {
             val orderInfoJsonString: String  = JSON.toJSONString(orderInfo,new SerializeConfig(true))
-             MyKafkaSink.send("DWD_ORDER_INFO",orderInfoJsonString)
+             MyKafkaSink.send("DWD_ORDER_INFO",orderInfo.id.toString ,  orderInfoJsonString)
           }
 
         }
