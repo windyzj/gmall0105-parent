@@ -89,16 +89,23 @@
             <version>4.5.2</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.codehaus.janino</groupId>
-            <artifactId>commons-compiler</artifactId>
-            <version>2.7.8</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.codehaus.janino</groupId>-->
+<!--            <artifactId>commons-compiler</artifactId>-->
+<!--            <version>2.7.8</version>-->
+<!--        </dependency>-->
 
         <dependency>
             <groupId>org.elasticsearch</groupId>
             <artifactId>elasticsearch</artifactId>
             <version>2.4.6</version>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/ru.yandex.clickhouse/clickhouse-jdbc -->
+      <dependency>
+            <groupId>ru.yandex.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>0.1.55</version>
         </dependency>
 
 

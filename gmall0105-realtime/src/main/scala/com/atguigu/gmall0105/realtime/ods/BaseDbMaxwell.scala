@@ -51,12 +51,17 @@ object BaseDbMaxwell {
           (("order_info".equals(jsonObj.getString("table"))&&"insert".equals(jsonObj.getString("type") ))
           ||"order_detail".equals(jsonObj.getString("table"))
           ||"base_province".equals(jsonObj.getString("table"))
+            ||"user_info".equals(jsonObj.getString("table"))
+            ||"base_category3".equals(jsonObj.getString("table"))
+            ||"base_trademark".equals(jsonObj.getString("table"))
+            ||"spu_info".equals(jsonObj.getString("table"))
+            ||"sku_info".equals(jsonObj.getString("table"))
           )
         ){
           val jsonString=jsonObj.getString("data")
           val tableName: String = jsonObj.getString("table")
           val topic="ODS_"+tableName.toUpperCase
-          Thread.sleep(500)
+       //   Thread.sleep(500)
           MyKafkaSink.send(topic,jsonString)   //非幂等的操作 可能会导致数据重复
         }
       }

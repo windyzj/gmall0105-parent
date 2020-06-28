@@ -1,8 +1,9 @@
 package com.atguigu.gmall0105.realtime.dws
 
-import java.lang
+import java.{lang, util}
 
 import com.alibaba.fastjson.JSON
+import com.alibaba.fastjson.serializer.SerializeConfig
 import com.atguigu.gmall0105.realtime.bean.{OrderDetail, OrderDetailWide, OrderInfo}
 import com.atguigu.gmall0105.realtime.util.{MyKafkaUtil, OffsetManager, RedisUtil}
 import org.apache.kafka.clients.consumer.ConsumerRecord
@@ -100,9 +101,11 @@ object OrderDetailWideApp {
       jedis.close()
       orderJoinedNewList.toIterator
     }
-    orderJoinedNewDstream.print(1000)
+
 
     val orderDetailWideDStream: DStream[OrderDetailWide] = orderJoinedNewDstream.map{case(orderId,(orderInfo,orderDetail))=>new OrderDetailWide(orderInfo,orderDetail)}
+   // orderDetailWideDStream.print(1000)
+
    /////////////////////////////////////////////////////////
    // 计算实付分摊需求
 ////////////////////////////////////////
@@ -137,15 +140,58 @@ object OrderDetailWideApp {
 
 //  伪代码
     //    1  先从redis取 两个合计    【实付分摊金额】的合计，【数量*单价】的合计
-    //    2 先判断是否是最后一笔  ： （数量*单价）== 原始总金额 -（其他明细 【数量*单价】的合计）
-    //    3.1  如果不是最后一笔：
-                      // 用乘除计算 ： 实付分摊金额=（数量*单价）*实付总金额 / 原始总金额
+    //    //    2 先判断是否是最后一笔  ： （数量*单价）== 原始总金额 -（其他明细 【数量*单价】的合计）
+    //    //    3.1  如果不是最后一笔：
+    //                      // 用乘除计算 ： 实付分摊金额=（数量*单价）*实付总金额 / 原始总金额
+    //
+    //    //    3.2 如果是最后一笔
+    //                     // 使用减法 ：   实付分摊金额= 实付总金额 - （其他明细已经计算好的【实付分摊金额】的合计）
+    //    //    4  进行合计保存
+    //              //  hincr
+    ////              【实付分摊金额】的合计，【数量*单价】的合计
 
-    //    3.2 如果是最后一笔
-                     // 使用减法 ：   实付分摊金额= 实付总金额 - （其他明细已经计算好的【实付分摊金额】的合计）
-    //    4  进行合计保存
-              //  hincr
-//              【实付分摊金额】的合计，【数量*单价】的合计
+    val orderWideWithSplitDstream: DStream[OrderDetailWide] = orderDetailWideDStream.mapPartitions { orderWideItr =>
+      val jedis: Jedis = RedisUtil.getJedisClient
+      //    1  先从redis取 两个合计    【实付分摊金额】的合计，【数量*单价】的合计
+      val orderWideList: List[OrderDetailWide] = orderWideItr.toList
+      for (orderWide <- orderWideList) {
+        // type ?   hash      key? order_split_amount:[order_id]  field split_amount_sum ,origin_amount_sum    value  ?  累积金额
+        val key = "order_split_amount:" + orderWide.order_id
+        val orderSumMap: util.Map[String, String] = jedis.hgetAll(key)
+        var splitAmountSum = 0D
+        var originAmountSum = 0D
+        if (orderSumMap != null && orderSumMap.size() > 0) {
+          val splitAmountSumString: String = orderSumMap.get("split_amount_sum")
+          splitAmountSum = splitAmountSumString.toDouble
+
+          val originAmountSumString: String = orderSumMap.get("origin_amount_sum")
+          originAmountSum = originAmountSumString.toDouble
+        }
+        //    2 先判断是否是最后一笔  ： （数量*单价）== 原始总金额 -（其他明细 【数量*单价】的合计）
+        val detailOrginAmount: Double = orderWide.sku_num * orderWide.sku_price //单条明细的原始金额  数量*单价
+        val restOriginAmount: Double = orderWide.final_total_amount - originAmountSum
+        if (detailOrginAmount == restOriginAmount) {
+          //3.1  最后一笔 用减法 ：实付分摊金额= 实付总金额 - （其他明细已经计算好的【实付分摊金额】的合计）
+          orderWide.final_detail_amount = orderWide.final_total_amount - splitAmountSum
+        } else {
+          //3.2  不是最后一笔 用乘除  实付分摊金额=（数量*单价）*实付总金额 / 原始总金额
+          orderWide.final_detail_amount = detailOrginAmount * orderWide.final_total_amount / orderWide.original_total_amount
+          orderWide.final_detail_amount= Math.round(orderWide.final_detail_amount*100D)/100D
+        }
+        //    4  进行合计保存
+        splitAmountSum += orderWide.final_detail_amount
+        originAmountSum += detailOrginAmount
+        orderSumMap.put("split_amount_sum", splitAmountSum.toString)
+        orderSumMap.put("origin_amount_sum", originAmountSum.toString)
+        jedis.hmset(key, orderSumMap)
+      }
+      jedis.close()
+      orderWideList.toIterator
+    }
+    orderWideWithSplitDstream
+
+    orderWideWithSplitDstream.map(orderwide=>JSON.toJSONString(orderwide,new SerializeConfig(true))).print(1000)
+
     ssc.start()
     ssc.awaitTermination()
   }

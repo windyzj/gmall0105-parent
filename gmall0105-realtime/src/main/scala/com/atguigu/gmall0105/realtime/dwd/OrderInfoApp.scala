@@ -5,7 +5,8 @@ import java.util.Date
 
 import com.alibaba.fastjson.serializer.SerializeConfig
 import com.alibaba.fastjson.{JSON, JSONObject}
-import com.atguigu.gmall0105.realtime.bean.{OrderInfo, ProvinceInfo, UserState}
+import com.atguigu.gmall0105.realtime.bean.dim.{ProvinceInfo, UserState}
+import com.atguigu.gmall0105.realtime.bean.OrderInfo
 import com.atguigu.gmall0105.realtime.util.{MyEsUtil, MyKafkaSink, MyKafkaUtil, OffsetManager, PhoenixUtil}
 import org.apache.hadoop.conf.Configuration
 import org.apache.kafka.clients.consumer.ConsumerRecord
@@ -139,9 +140,32 @@ object OrderInfoApp {
 
     }
 
+    //////////////////用户信息关联//////////////////////////
+    val orderInfoWithUserDstream: DStream[OrderInfo] = orderInfoWithProvinceDstream.mapPartitions { orderInfoItr =>
+      val orderList: List[OrderInfo] = orderInfoItr.toList
+      if(orderList.size>0) {
+        val userIdList: List[Long] = orderList.map(_.user_id)
+        val sql = "select id ,user_level ,  birthday  , gender  , age_group  , gender_name from gmall0105_user_info where id in ('" + userIdList.mkString("','") + "')"
+        val userJsonObjList: List[JSONObject] = PhoenixUtil.queryList(sql)
+        val userJsonObjMap: Map[Long, JSONObject] = userJsonObjList.map(userJsonObj => (userJsonObj.getLongValue("ID"), userJsonObj)).toMap
+        for (orderInfo <- orderList) {
+          val userJsonObj: JSONObject = userJsonObjMap.getOrElse(orderInfo.user_id, null)
+          orderInfo.user_age_group = userJsonObj.getString("AGE_GROUP")
+          orderInfo.user_gender = userJsonObj.getString("GENDER_NAME")
+        }
+      }
+      orderList.toIterator
+    }
 
 
-//    orderInfoWithFirstRealFlagDstream.mapPartitions{orderInfoItr=>
+
+
+
+
+
+
+
+    //    orderInfoWithFirstRealFlagDstream.mapPartitions{orderInfoItr=>
 //      val orderInfoList: List[OrderInfo] = orderInfoItr.toList
 //
 //      val provinceList: List[JSONObject] = provinceBC.value
@@ -164,7 +188,7 @@ object OrderInfoApp {
 
 
 
-    orderInfoWithProvinceDstream.print(1000)
+    orderInfoWithUserDstream.print(1000)
 
       /*  查询次数太多 欠优化
         orderInfoDstream.map{orderInfo=>
@@ -189,9 +213,9 @@ object OrderInfoApp {
 
 
       // 维度数据的合并
-    orderInfoWithProvinceDstream.cache()
+    orderInfoWithUserDstream.cache()
       // 保存 用户状态--> 更新hbase 维护状态
-    orderInfoWithProvinceDstream.foreachRDD{rdd=>
+    orderInfoWithUserDstream.foreachRDD{rdd=>
       //driver
     //Seq 中的字段顺序 和 rdd中对象的顺序一直
       // 把首单的订单 更新到用户状态中
@@ -203,12 +227,12 @@ object OrderInfoApp {
 
     }
 
-    orderInfoWithProvinceDstream.foreachRDD{rdd=>
+    orderInfoWithUserDstream.foreachRDD{rdd=>
         rdd.foreachPartition{ orderInfoItr=>
           val orderInfoList: List[OrderInfo] = orderInfoItr.toList
           val orderInfoWithIdList: List[(String, OrderInfo)] = orderInfoList.map(orderInfo=>(orderInfo.id.toString,orderInfo))
           val dateString: String = new SimpleDateFormat("yyyy-MM-dd").format(new Date())
-          MyEsUtil.bulkDoc(orderInfoWithIdList,"gmall0105_order_info_"+dateString)
+      //    MyEsUtil.bulkDoc(orderInfoWithIdList,"gmall0105_order_info_"+dateString)
           for (orderInfo <- orderInfoList ) {
             val orderInfoJsonString: String  = JSON.toJSONString(orderInfo,new SerializeConfig(true))
              MyKafkaSink.send("DWD_ORDER_INFO",orderInfo.id.toString ,  orderInfoJsonString)

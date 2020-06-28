@@ -1,7 +1,7 @@
 package com.atguigu.gmall0105.realtime.dim
 
 import com.alibaba.fastjson.JSON
-import com.atguigu.gmall0105.realtime.bean.ProvinceInfo
+import com.atguigu.gmall0105.realtime.bean.dim.ProvinceInfo
 import com.atguigu.gmall0105.realtime.util.{MyKafkaUtil, OffsetManager}
 import org.apache.hadoop.conf.Configuration
 import org.apache.kafka.clients.consumer.ConsumerRecord
