@@ -1,5 +1,6 @@
 package com.atguigu.gmall0105.realtime.dws
 
+import java.util.Properties
 import java.{lang, util}
 
 import com.alibaba.fastjson.JSON
@@ -9,6 +10,8 @@ import com.atguigu.gmall0105.realtime.util.{MyKafkaUtil, OffsetManager, RedisUti
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.SparkConf
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
@@ -188,9 +191,36 @@ object OrderDetailWideApp {
       jedis.close()
       orderWideList.toIterator
     }
-    orderWideWithSplitDstream
 
+    orderWideWithSplitDstream.cache()
     orderWideWithSplitDstream.map(orderwide=>JSON.toJSONString(orderwide,new SerializeConfig(true))).print(1000)
+
+
+    //写入到clickhouse中
+    val sparkSession = SparkSession.builder()
+      .appName("order_detail_wide_spark_app")
+      .getOrCreate()
+
+    import sparkSession.implicits._
+
+    orderWideWithSplitDstream.foreachRDD{rdd=>
+      //val orderDetailWideRDD: RDD[OrderDetailWide] = rdd.filter(orderDetailWide=>orderDetailWide.order_detail_id!=null&&orderDetailWide.order_detail_id>0L)
+      val df: DataFrame = rdd.toDF()
+
+      df.write.mode(SaveMode.Append)
+        .option("batchsize", "100")
+        .option("isolationLevel", "NONE") // 设置事务
+        .option("numPartitions", "4") // 设置并发
+        .option("driver","ru.yandex.clickhouse.ClickHouseDriver")
+        .jdbc("jdbc:clickhouse://hdp1:8123/test0105","order_wide_0105",new Properties())
+
+      OffsetManager.saveOffset(topicOrderInfo,groupIdOrderInfo,orderInfoOffsetRanges)
+      OffsetManager.saveOffset(topicOrderDetail,groupIdOrderDetail,orderDetailOffsetRanges)
+
+    }
+
+
+
 
     ssc.start()
     ssc.awaitTermination()
