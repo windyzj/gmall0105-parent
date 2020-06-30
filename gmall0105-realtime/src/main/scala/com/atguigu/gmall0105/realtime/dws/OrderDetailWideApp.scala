@@ -6,7 +6,7 @@ import java.{lang, util}
 import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.serializer.SerializeConfig
 import com.atguigu.gmall0105.realtime.bean.{OrderDetail, OrderDetailWide, OrderInfo}
-import com.atguigu.gmall0105.realtime.util.{MyKafkaUtil, OffsetManager, RedisUtil}
+import com.atguigu.gmall0105.realtime.util.{MyKafkaSink, MyKafkaUtil, OffsetManager, RedisUtil}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.SparkConf
@@ -203,7 +203,17 @@ object OrderDetailWideApp {
 
     import sparkSession.implicits._
 
-    orderWideWithSplitDstream.foreachRDD{rdd=>
+
+    val orderWideKafkaSentDstream: DStream[OrderDetailWide] = orderWideWithSplitDstream.mapPartitions { orderWideItr =>
+      val orderWideList: List[OrderDetailWide] = orderWideItr.toList
+      for (orderWide <- orderWideList) {
+        MyKafkaSink.send("DWS_ORDER_WIDE", JSON.toJSONString(orderWide, new SerializeConfig(true)))
+      }
+      orderWideList.toIterator
+    }
+
+
+    orderWideKafkaSentDstream.foreachRDD{rdd=>
       //val orderDetailWideRDD: RDD[OrderDetailWide] = rdd.filter(orderDetailWide=>orderDetailWide.order_detail_id!=null&&orderDetailWide.order_detail_id>0L)
       val df: DataFrame = rdd.toDF()
 
@@ -218,8 +228,6 @@ object OrderDetailWideApp {
       OffsetManager.saveOffset(topicOrderDetail,groupIdOrderDetail,orderDetailOffsetRanges)
 
     }
-
-
 
 
     ssc.start()
