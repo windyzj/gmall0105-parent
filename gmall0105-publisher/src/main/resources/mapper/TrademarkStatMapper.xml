@@ -1,0 +1,14 @@
+<!DOCTYPE mapper SYSTEM "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.atguigu.gmall0105.publisher.mapper.TrademarkStatMapper">
+    <!-- 1传参  2 返回值 -->
+    <select id="selectTrademarkSum" resultMap="trademarkRsMap">
+        SELECT trademark_id , trademark_name ,SUM(amount) order_amount
+        FROM  trademark_amount_stat
+        WHERE stat_time &gt; #{startTime} AND stat_time  &lt;#{endTime}
+        GROUP BY trademark_id , trademark_name
+        ORDER BY order_amount DESC
+        LIMIT #{topn}
+    </select>
+
+    <resultMap id="trademarkRsMap" type="java.util.Map" autoMapping="true"></resultMap>
+</mapper>
